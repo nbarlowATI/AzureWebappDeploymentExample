@@ -1,0 +1,172 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: auth-app
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-deployment
+  namespace: auth-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: {frontend-docker-image-name}
+        ports:
+        - containerPort: 3000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+  namespace: auth-app
+spec:
+  selector:
+    app: frontend
+  ports:
+    - protocol: TCP
+      port: 3000
+      targetPort: 3000
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-deployment
+  namespace: auth-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+      - name: backend
+        image: {backend-docker-image-name}
+        ports:
+        - containerPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: auth-app
+spec:
+  selector:
+    app: backend
+  ports:
+    - protocol: TCP
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: auth-ingress
+  namespace: auth-app
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+
+#    nginx.ingress.kubernetes.io/auth-url: "http://oauth2-proxy.auth-app.svc.cluster.local:80/oauth2/auth"
+#    nginx.ingress.kubernetes.io/auth-signin: "https://<your-domain>/oauth2/start?rd=$request_uri"
+spec:
+  tls:
+  - hosts:
+    - {hostname}
+    secretName: myapp-tls
+  ingressClassName: nginx
+  rules:
+  - host: {hostname}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend-service
+            port:
+              number: 3000
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: backend-service
+            port:
+              number: 8000
+
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: {my-email-address}
+    privateKeySecretRef:
+      name: letsencrypt-prod
+    solvers:
+    - http01:
+        ingress:
+          class: nginx
+#---
+#apiVersion: apps/v1
+#kind: Deployment
+#metadata:
+#  name: oauth2-proxy
+#  namespace: auth-app
+#spec:
+#  replicas: 1
+#  selector:
+#    matchLabels:
+#      app: oauth2-proxy
+#  template:
+#    metadata:
+#      labels:
+#        app: oauth2-proxy
+#    spec:
+#      containers:
+#      - name: oauth2-proxy
+#        image: quay.io/oauth2-proxy/oauth2-proxy:v7.2.1
+#        args:
+#          - --provider=azure
+#          - --azure-tenant=<your-tenant-id>
+#          - --client-id=<your-client-id>
+#          - --client-secret=<your-client-secret>
+#          - --cookie-secret=<your-cookie-secret>
+#          - --cookie-secure=true
+#          - --redirect-url=https://<your-domain>/oauth2/callback
+#          - --email-domain=*
+#          - --upstream=http://frontend-service:3000/
+#        ports:
+#          - containerPort: 4180
+#---
+#apiVersion: v1
+#kind: Service
+#metadata:
+#  name: oauth2-proxy
+#  namespace: auth-app
+#spec:
+#  selector:
+#    app: oauth2-proxy
+#  ports:
+#    - protocol: TCP
+#      port: 80
+#      targetPort: 4180
+#  type: ClusterIP
+#---

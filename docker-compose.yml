@@ -1,0 +1,34 @@
+version: "3.8"
+services:
+    frontend:
+        container_name: frontend
+        domainname: "frontend"
+        image: authtest/authtest-frontend:latest
+        ports:
+            - 3000:3000
+        networks:
+            - app-network
+
+    backend:
+        container_name: backend
+        domainname: "backend"
+        image: authtest/authtest-backend:latest
+        ports:
+           - 8000:8000
+        networks:
+            - app-network
+
+    nginx:
+        image: authtest/authtest-reverse-proxy:latest
+        ports:
+            - "80:80"
+        depends_on:
+            - frontend
+            - backend
+        networks:
+            - app-network
+        environment:
+            VIRTUAL_HOST: "nginx"
+networks:
+    app-network:
+        driver: bridge
