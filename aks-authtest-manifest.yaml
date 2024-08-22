@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: {frontend-docker-image-name}
+        image: {frontend-image}
         ports:
         - containerPort: 3000
 ---
@@ -55,7 +55,7 @@ spec:
     spec:
       containers:
       - name: backend
-        image: {backend-docker-image-name}
+        image: {backend-image}
         ports:
         - containerPort: 8000
 ---
@@ -71,6 +71,7 @@ spec:
     - protocol: TCP
       port: 8000
       targetPort: 8000
+  sessionAffinity: ClientIP  # Enables sticky sessions based on the client's IP address
   type: ClusterIP
 ---
 apiVersion: networking.k8s.io/v1
@@ -81,17 +82,21 @@ metadata:
   annotations:
     cert-manager.io/cluster-issuer: "letsencrypt-prod"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
-
-#    nginx.ingress.kubernetes.io/auth-url: "http://oauth2-proxy.auth-app.svc.cluster.local:80/oauth2/auth"
-#    nginx.ingress.kubernetes.io/auth-signin: "https://<your-domain>/oauth2/start?rd=$request_uri"
+    nginx.ingress.kubernetes.io/auth-url: "http://oauth2-proxy.auth-app.svc.cluster.local:80/oauth2/auth"
+    nginx.ingress.kubernetes.io/auth-signin: "https://{host}/oauth2/start?rd=$escaped_request_uri"
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+    nginx.ingress.kubernetes.io/proxy-buffers-number: "8"
+    nginx.ingress.kubernetes.io/proxy-buffering: "on"
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/session-cookie-path: "/"
 spec:
   tls:
   - hosts:
-    - {hostname}
+    - {host}
     secretName: myapp-tls
   ingressClassName: nginx
   rules:
-  - host: {hostname}
+  - host: {host}
     http:
       paths:
       - path: /
@@ -108,7 +113,29 @@ spec:
             name: backend-service
             port:
               number: 8000
-
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: oauth2-proxy-ingress
+  namespace: auth-app
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "16k"
+    nginx.ingress.kubernetes.io/proxy-buffers-number: "8"
+    nginx.ingress.kubernetes.io/proxy-buffering: "on"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: {host}
+    http:
+      paths:
+      - path: /oauth2
+        pathType: Prefix
+        backend:
+          service:
+            name: oauth2-proxy
+            port:
+              number: 80
 ---
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -117,56 +144,61 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: {my-email-address}
+    email: {email}
     privateKeySecretRef:
       name: letsencrypt-prod
     solvers:
     - http01:
         ingress:
           class: nginx
-#---
-#apiVersion: apps/v1
-#kind: Deployment
-#metadata:
-#  name: oauth2-proxy
-#  namespace: auth-app
-#spec:
-#  replicas: 1
-#  selector:
-#    matchLabels:
-#      app: oauth2-proxy
-#  template:
-#    metadata:
-#      labels:
-#        app: oauth2-proxy
-#    spec:
-#      containers:
-#      - name: oauth2-proxy
-#        image: quay.io/oauth2-proxy/oauth2-proxy:v7.2.1
-#        args:
-#          - --provider=azure
-#          - --azure-tenant=<your-tenant-id>
-#          - --client-id=<your-client-id>
-#          - --client-secret=<your-client-secret>
-#          - --cookie-secret=<your-cookie-secret>
-#          - --cookie-secure=true
-#          - --redirect-url=https://<your-domain>/oauth2/callback
-#          - --email-domain=*
-#          - --upstream=http://frontend-service:3000/
-#        ports:
-#          - containerPort: 4180
-#---
-#apiVersion: v1
-#kind: Service
-#metadata:
-#  name: oauth2-proxy
-#  namespace: auth-app
-#spec:
-#  selector:
-#    app: oauth2-proxy
-#  ports:
-#    - protocol: TCP
-#      port: 80
-#      targetPort: 4180
-#  type: ClusterIP
-#---
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth2-proxy
+  namespace: auth-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oauth2-proxy
+  template:
+    metadata:
+      labels:
+        app: oauth2-proxy
+    spec:
+      containers:
+      - name: oauth2-proxy
+        image: quay.io/oauth2-proxy/oauth2-proxy:v7.2.1
+        args:
+          - --provider=azure
+          - --azure-tenant={tenant_id}
+          - --client-id={client_id}
+          - --client-secret={client_secret}
+          - --cookie-secret=-{cookie_secret}
+          - --cookie-secure=true
+          - --redirect-url=https://{host}/oauth2/callback
+          - --email-domain=*
+          - --upstream=http://frontend-service:3000/
+          - --http-address=0.0.0.0:4180
+          - --skip-provider-button=false
+        ports:
+          - containerPort: 4180
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: oauth2-proxy
+  name: oauth2-proxy
+  namespace: auth-app
+spec:
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 4180
+  selector:
+    app: oauth2-proxy
+---
