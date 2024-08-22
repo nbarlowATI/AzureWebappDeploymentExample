@@ -45,13 +45,15 @@ async def clear_tenants():
     Tenant.users = {}
 
 @app.post("/start_counter/{tenant_id}")
-async def counter(tenant_id):
+async def start_counter(tenant_id):
     Tenant.users[tenant_id] = Runner()
     asyncio.create_task(Tenant.users[tenant_id].run_main())
     return True
 
 @app.get("/get_count/{tenant_id}")
 async def get_count(tenant_id):
+    if not tenant_id in Tenant.users.keys():
+        await start_counter(tenant_id)
     return {tenant_id: Tenant.users[tenant_id].counter.get_count()}
 
 @app.post("/increment_count/{tenant_id}")
